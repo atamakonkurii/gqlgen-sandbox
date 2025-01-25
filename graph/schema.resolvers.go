@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/osuosu/gqlgen-todos/graph/model"
 )
@@ -30,6 +31,48 @@ func (r *queryResolver) Todos(ctx context.Context) ([]*model.Todo, error) {
 	return r.todos, nil
 }
 
+// CurrentTime is the resolver for the currentTime field.
+func (r *subscriptionResolver) CurrentTime(ctx context.Context) (<-chan *model.Time, error) {
+	// First you'll need to `make()` your channel. Use your type here!
+	ch := make(chan *model.Time)
+
+	// You can (and probably should) handle your channels in a central place outside of `schema.resolvers.go`.
+	// For this example we'll simply use a Goroutine with a simple loop.
+	go func() {
+		// Handle deregistration of the channel here. Note the `defer`
+		defer close(ch)
+
+		for {
+			// In our example we'll send the current time every second.
+			time.Sleep(1 * time.Second)
+			fmt.Println("Tick")
+
+			// Prepare your object.
+			currentTime := time.Now()
+			t := &model.Time{
+				UnixTime:  int32(currentTime.Unix()),
+				TimeStamp: currentTime.Format(time.RFC3339),
+			}
+
+			// The subscription may have got closed due to the client disconnecting.
+			// Hence we do send in a select block with a check for context cancellation.
+			// This avoids goroutine getting blocked forever or panicking,
+			select {
+			case <-ctx.Done(): // This runs when context gets cancelled. Subscription closes.
+				fmt.Println("Subscription Closed")
+				// Handle deregistration of the channel here. `close(ch)`
+				return // Remember to return to end the routine.
+
+			case ch <- t: // This is the actual send.
+				// Our message went through, do nothing
+			}
+		}
+	}()
+
+	// We return the channel and no error.
+	return ch, nil
+}
+
 // User is the resolver for the user field.
 func (r *todoResolver) User(ctx context.Context, obj *model.Todo) (*model.User, error) {
 	return &model.User{ID: obj.UserID, Name: "user " + obj.UserID}, nil
@@ -41,9 +84,13 @@ func (r *Resolver) Mutation() MutationResolver { return &mutationResolver{r} }
 // Query returns QueryResolver implementation.
 func (r *Resolver) Query() QueryResolver { return &queryResolver{r} }
 
+// Subscription returns SubscriptionResolver implementation.
+func (r *Resolver) Subscription() SubscriptionResolver { return &subscriptionResolver{r} }
+
 // Todo returns TodoResolver implementation.
 func (r *Resolver) Todo() TodoResolver { return &todoResolver{r} }
 
 type mutationResolver struct{ *Resolver }
 type queryResolver struct{ *Resolver }
+type subscriptionResolver struct{ *Resolver }
 type todoResolver struct{ *Resolver }
